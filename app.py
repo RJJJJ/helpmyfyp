@@ -198,7 +198,7 @@ if 'analysis_requested' not in st.session_state: st.session_state.analysis_reque
 # ================= MLOPS: PRE-LOADING & WARM-UP =================
 # 在任何 UI 元件渲染之前，強制執行一次模型加載與預熱。
 # 由於使用了 @st.cache_resource，這段程式碼只會在伺服器重啟後的第一次載入時耗時。
-with st.spinner("Initializing Deep Learning Pipeline (Pre-loading)..."):
+with st.spinner("Initializing analysis pipeline..."):
     _ = inference.get_predictor()
     
 # ================= HELPER FUNCTIONS =================
@@ -350,9 +350,11 @@ def get_workflow_stage_index():
         return 1
     if st.session_state.get('confirmed_file', False) and not st.session_state.get('analysis_requested', False):
         return 2
-    if st.session_state.get('open_patient_dialog', False):
+    if st.session_state.get('analysis_requested', False) and (
+        st.session_state.get('open_patient_dialog', False) or not st.session_state.get('user_data')
+    ):
         return 3
-    if st.session_state.get('run_analysis', False) and not st.session_state.get('inference_done', False):
+    if st.session_state.get('analysis_requested', False) and st.session_state.get('user_data') and not st.session_state.get('inference_done', False):
         return 4
     if st.session_state.get('inference_done', False) and not st.session_state.get('report_generated', False):
         return 5
@@ -551,10 +553,63 @@ def render_confirm_input():
             st.session_state.confirmed_file = True
             st.rerun()
 
+def get_selected_study_context(uploaded_file=None):
+    source = st.session_state.get('upload_source', 'N/A')
+    study_id = getattr(uploaded_file, "name", "N/A") if uploaded_file is not None else "N/A"
+    image_id = "N/A"
+    capture_date = date.today().strftime("%Y-%m-%d")
+    if source == "device" and st.session_state.get("selected_local_file"):
+        fpath = st.session_state.selected_local_file
+        study_id = os.path.splitext(os.path.basename(fpath))[0]
+        image_id = os.path.basename(fpath)
+        capture_date = datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%d")
+    elif source == "manual" and st.session_state.get("manual_uploaded_file"):
+        fname = st.session_state.manual_uploaded_file.name
+        study_id = os.path.splitext(fname)[0]
+        image_id = fname
+    return {
+        "source": source.capitalize() if source else "N/A",
+        "study_id": study_id,
+        "image_id": image_id,
+        "date": capture_date
+    }
+
+def render_subject_context_card(uploaded_file=None, show_edit=False):
+    user = st.session_state.get("user_data") or {}
+    ctx = get_selected_study_context(uploaded_file)
+    st.markdown("#### Subject Context")
+    st.markdown('<div class="study-summary-card">', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f"**Subject ID**  \n`{user.get('name', 'Not set')}`")
+    c2.markdown(f"**Age / Gender**  \n{user.get('age', 'Not set')} / {user.get('gender', 'Not set')}")
+    c3.markdown(f"**FOV**  \n{user.get('fov', 'Not set')} mm")
+    c4, c5, c6 = st.columns(3)
+    c4.markdown(f"**Date**  \n{ctx['date']}")
+    c5.markdown(f"**Source**  \n{ctx['source']}")
+    c6.markdown(f"**Study/Image ID**  \n`{ctx['study_id']} / {ctx['image_id']}`")
+    if show_edit:
+        if st.button("Edit Metadata", key=f"edit_metadata_{ctx['image_id']}", use_container_width=False):
+            st.session_state.open_patient_dialog = True
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def render_stage4_readiness():
+    st.markdown("### Run Analysis")
+    st.info("Analysis readiness confirmed. Pipeline is prepared for execution.")
+    with st.container(border=True):
+        st.markdown("**Pipeline Steps**")
+        st.markdown("- Model Warm-Up")
+        st.markdown("- Image Inference")
+        st.markdown("- Segmentation Overlay")
+        st.markdown("- Morphology Statistics")
+    if st.button("Run Analysis", type="primary", use_container_width=True):
+        st.session_state.run_analysis = True
+        st.rerun()
+
 # ================= 2. DATA INPUT DIALOG =================
 @st.dialog("🧪 Subject & Clinical Metadata")
 def get_patient_info():
-    st.write("Enter clinical parameters for quantitative standardization.")
+    st.write("Complete subject metadata to establish standardized research context.")
     with st.form("patient_form"):
         col1, col2 = st.columns(2)
         with col1:
@@ -567,11 +622,11 @@ def get_patient_info():
         st.markdown("---")
         if st.form_submit_button("✅ Initialize Research Pipeline"):
             st.session_state.user_data = {"name": name, "age": age, "gender": gender, "fov": fov}
-            st.session_state.run_analysis = True
+            st.session_state.run_analysis = False
             st.session_state.inference_done = False
             st.session_state.manual_regions = []
             st.session_state.open_patient_dialog = False
-            st.session_state.analysis_requested = False
+            st.session_state.analysis_requested = True
             st.rerun()
 
 @st.dialog("Define Morphology")
@@ -639,11 +694,11 @@ if 'model_loaded' not in st.session_state:
     st.session_state.model_loaded = False
 
 if not st.session_state.model_loaded:
-    with st.spinner("🚀 [MLOps] 系統冷啟動中，正在載入深度學習模型至記憶體 (僅需執行一次)..."):
+    with st.spinner("Initializing analysis pipeline..."):
         # 這裡會觸發 inference.py 裡面的 get_predictor
         _ = inference.get_predictor()
         st.session_state.model_loaded = True
-        st.success("✅ 模型載入完成！系統已準備就緒。")
+        st.success("Analysis ready.")
 
 # ================= PACS-LIKE DUAL-TRACK IMAGE LOADING =================
 st.markdown("""
@@ -726,16 +781,27 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                     st.session_state.analysis_requested = True
                     if not st.session_state.get('user_data'):
                         st.session_state.open_patient_dialog = True
-                    else:
-                        st.session_state.run_analysis = True
-                        st.session_state.inference_done = False
+                    st.session_state.run_analysis = False
+                    st.session_state.inference_done = False
                     st.rerun()
 
-        # 背景推論邏輯 (當使用者填完彈出表單後才會觸發)
+        if st.session_state.get('analysis_requested', False):
+            render_subject_context_card(uploaded_file=uploaded_file, show_edit=True)
+            if not st.session_state.get('user_data'):
+                st.warning("Metadata review required before analysis can proceed.")
+                if st.button("Enter Metadata", type="primary", use_container_width=True):
+                    st.session_state.open_patient_dialog = True
+                    st.rerun()
+            else:
+                render_stage4_readiness()
+
+        # 背景推論邏輯 (由 Stage 4 Run Analysis 觸發)
         if st.session_state.run_analysis and st.session_state.user_data and not st.session_state.inference_done:
-            with st.spinner("🧠 Deep Learning Inference (In-Memory)..."):
+            with st.spinner("Running segmentation model..."):
                 uploaded_file.seek(0)
                 original, overlay, stats, raw_mask = inference.process_image(uploaded_file)
+                with st.spinner("Computing morphology metrics..."):
+                    pass
                 
                 FIXED_WIDTH = 800
                 st.session_state.processed_original = inference.resize_with_aspect_ratio(original, width=FIXED_WIDTH)
@@ -745,10 +811,12 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                 st.session_state.current_min_area = 100 
                 _, st.session_state.cleaned_mask = inference.simplified_post_processing(st.session_state.raw_mask, min_area=100)
                 st.session_state.inference_done = True
+                st.success("Analysis ready.")
                 st.rerun()
 
     # ---------------- 狀態二：推論完成 (顯示 4:6 控制台與數據面版) ----------------
     else:
+        render_subject_context_card(uploaded_file=uploaded_file, show_edit=True)
         col_left, col_right = st.columns([4, 6], gap="large")
 
         # 🔴 左半部：視覺與互動控制
