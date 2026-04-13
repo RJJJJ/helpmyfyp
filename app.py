@@ -195,6 +195,24 @@ st.markdown("""
         padding: 12px;
         min-height: 170px;
     }
+    .insight-card {
+        border: 1px solid #d8d5cf;
+        border-radius: 10px;
+        background: #fcfbf8;
+        padding: 12px;
+        min-height: 145px;
+    }
+    .insight-chip {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    .insight-positive { background: #eaf3e7; color: #45653c; border: 1px solid #c8dbc2; }
+    .insight-neutral { background: #eef2f4; color: #4d6770; border: 1px solid #d0dade; }
+    .insight-concern { background: #f8ecea; color: #8a4d47; border: 1px solid #e7cbc6; }
     .risk-badge {
         display: inline-block;
         padding: 2px 8px;
@@ -820,6 +838,109 @@ def get_personal_result_statement(score, risk_profile, live_stats):
         return "Your profile shows meaningful flow variability, and trend monitoring is recommended."
     return "Your profile shows mixed microcirculatory features, and periodic follow-up can help track changes over time."
 
+def get_score_drivers(health_score, final_density, live_stats, risk_profile):
+    abnormal_like = int(live_stats.get("Abnormal", 0)) + int(live_stats.get("Hemo", 0)) + int(live_stats.get("Aggregation", 0))
+    normal = int(live_stats.get("Normal", 0))
+    levels = risk_profile.get("risk_levels", {})
+    structural_level = levels.get("structural", "Moderate").lower()
+    edema_level = levels.get("edema", "Moderate").lower()
+
+    density_direction = "positive" if final_density >= 7 else "concern" if final_density < 5 else "neutral"
+    density_line = (
+        "Your density profile supported a stronger overall score."
+        if density_direction == "positive"
+        else "Your density level was acceptable but not a major score driver."
+        if density_direction == "neutral"
+        else "Lower density had a noticeable downward effect on your score."
+    )
+    density_support = f"Measured density: {final_density:.1f}/mm, interpreted against the healthy reference range."
+
+    structure_direction = "positive" if normal >= abnormal_like and structural_level == "low" else "concern" if structural_level == "high" else "neutral"
+    structure_line = (
+        "Your morphology profile remained mostly regular, which supported score stability."
+        if structure_direction == "positive"
+        else "Mild structural irregularities had the biggest downward effect."
+        if structure_direction == "concern"
+        else "Structural variation was present, with a moderate influence on the score."
+    )
+    structure_support = f"Normal loops: {normal}, irregular-pattern loops: {abnormal_like}."
+
+    edema_direction = "positive" if edema_level == "low" else "concern" if edema_level == "high" else "neutral"
+    edema_line = (
+        "Edema-related indicators remained relatively controlled."
+        if edema_direction == "positive"
+        else "Edema-related variation was present and influenced the score trend."
+        if edema_direction == "concern"
+        else "Edema-related signal remained stable with mild variability."
+    )
+    edema_support = f"Edema / inflammation risk level: {levels.get('edema', 'Moderate')}."
+
+    return [
+        {"title": "Density impact", "direction": density_direction, "line": density_line, "support": density_support},
+        {"title": "Structural impact", "direction": structure_direction, "line": structure_line, "support": structure_support},
+        {"title": "Edema signal impact", "direction": edema_direction, "line": edema_line, "support": edema_support},
+    ]
+
+def get_risk_plain_language(key, level):
+    level = (level or "Moderate").lower()
+    mapping = {
+        "structural": {
+            "low": "Structural pattern: within expected range.",
+            "moderate": "Structural pattern: mild concern.",
+            "high": "Structural pattern: notable concern and should be reviewed.",
+        },
+        "raynaud": {
+            "low": "Flow stability: within expected range.",
+            "moderate": "Flow stability: some variability detected.",
+            "high": "Flow stability: marked variability that may need follow-up.",
+        },
+        "edema": {
+            "low": "Inflammatory signal: low.",
+            "moderate": "Inflammatory signal: mild elevation.",
+            "high": "Inflammatory signal: elevated and worth closer tracking.",
+        },
+    }
+    return mapping.get(key, {}).get(level, "Pattern suggests moderate variation.")
+
+def generate_user_summary(score, risk_profile, live_stats):
+    band = get_health_band(score)["label"]
+    levels = risk_profile.get("risk_levels", {})
+    structural_level = levels.get("structural", "Moderate").lower()
+    raynaud_level = levels.get("raynaud", "Moderate").lower()
+    edema_level = levels.get("edema", "Moderate").lower()
+    statement = get_personal_result_statement(score, risk_profile, live_stats)
+
+    if band in ["Excellent", "Good"] and all(level != "high" for level in [structural_level, raynaud_level, edema_level]):
+        lead = "Your current result suggests generally stable microcirculation."
+    elif any(level == "high" for level in [structural_level, raynaud_level, edema_level]):
+        lead = "Your current result indicates mixed stability with specific features that may reflect ongoing stress."
+    else:
+        lead = "Your current result appears moderately stable, with targeted areas to monitor."
+
+    return (
+        f"{lead} {statement} This analysis is intended for screening and research interpretation, "
+        "and should be considered together with clinical context rather than treated as a standalone diagnosis."
+    )
+
+def generate_next_steps(risk_profile, final_density):
+    levels = risk_profile.get("risk_levels", {})
+    immediate_steps = ["Recheck one scan under consistent lighting, magnification, and finger temperature to improve comparability."]
+    long_term_steps = ["Track trends across repeated scans rather than relying on a single reading."]
+
+    if levels.get("structural", "").lower() in ["moderate", "high"]:
+        immediate_steps.append("Flag structural irregular regions for focused clinician review on the next visit.")
+        long_term_steps.append("Compare morphology composition over time to confirm whether irregular patterns persist or normalize.")
+    if levels.get("raynaud", "").lower() in ["moderate", "high"]:
+        immediate_steps.append("Document symptoms and exposure triggers (cold/stress) near the scan time to contextualize flow variability.")
+        long_term_steps.append("Schedule follow-up captures under similar conditions to assess flow stability trends.")
+    if levels.get("edema", "").lower() in ["moderate", "high"]:
+        immediate_steps.append("Review edema-related regions with a clinician if swelling/inflammatory signs continue.")
+        long_term_steps.append("Monitor edema index direction over serial scans to identify sustained increases.")
+    if final_density < 5:
+        immediate_steps.append("Repeat imaging with careful focus and contact pressure control to verify low-density signal.")
+
+    return {"immediate": immediate_steps[:2], "long_term": long_term_steps[:2]}
+
 def render_hero_result(health_score, percentile, risk_profile, live_stats):
     band = get_health_band(health_score)
     percentile_line, _ = get_percentile_text(percentile)
@@ -954,39 +1075,41 @@ def render_clinical_dashboard(user, live_stats, health_score, percentile, risk_p
 
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
     st.markdown("#### What influenced your score")
-    i1, i2, i3, i4 = st.columns(4)
-    i1.metric("Live Density", f"{final_density:.1f}/mm")
-    i2.metric("Normal Loops", f"{live_stats.get('Normal', 0)}")
-    i3.metric("Abnormal Loops", f"{live_stats.get('Abnormal', 0)}")
-    i4.metric("Validation Adjustments", f"+{manual_count}")
-    st.caption("These inputs are directly derived from model output and physician validation edits.")
+    drivers = get_score_drivers(health_score, final_density, live_stats, risk_profile)
+    dcols = st.columns(3)
+    for col, driver in zip(dcols, drivers):
+        chip_label = {"positive": "Positive influence", "neutral": "Neutral influence", "concern": "Concern influence"}[driver["direction"]]
+        chip_class = {"positive": "insight-positive", "neutral": "insight-neutral", "concern": "insight-concern"}[driver["direction"]]
+        with col:
+            st.markdown('<div class="insight-card">', unsafe_allow_html=True)
+            st.markdown(f"<span class='insight-chip {chip_class}'>{chip_label}</span>", unsafe_allow_html=True)
+            st.markdown(f"**{driver['title']}**")
+            st.write(driver["line"])
+            st.caption(driver["support"])
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.caption("Insight cards summarize the strongest upward or downward effects from current analysis outputs.")
     st.altair_chart(plot_health_score_bar(health_score), use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
     st.markdown("#### What this means")
     band = get_health_band(health_score)["label"]
-    statement = get_personal_result_statement(health_score, risk_profile, live_stats)
+    summary = generate_user_summary(health_score, risk_profile, live_stats)
     st.markdown(f"**Current status:** {band}")
-    st.write(statement)
-    st.caption("This summary is an analytical interpretation and does not replace medical diagnosis.")
+    st.write(summary)
+    st.caption("This result currently indicates a screening/research interpretation and does not replace formal diagnosis.")
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
     st.markdown("#### Next steps")
-    levels = risk_profile.get("risk_levels", {})
-    next_steps = []
-    if levels.get("structural", "").lower() in ["moderate", "high"]:
-        next_steps.append("Track structural morphology trend over follow-up sessions.")
-    if levels.get("raynaud", "").lower() in ["moderate", "high"]:
-        next_steps.append("Review flow variability with symptom history and environmental triggers.")
-    if levels.get("edema", "").lower() in ["moderate", "high"]:
-        next_steps.append("Monitor edema/inflammation indicators in subsequent captures.")
-    if not next_steps:
-        next_steps.append("Maintain periodic check-ins to confirm microcirculation stability.")
-    for idx, step in enumerate(next_steps, start=1):
+    next_steps = generate_next_steps(risk_profile, final_density)
+    st.markdown("**Immediate next step**")
+    for idx, step in enumerate(next_steps["immediate"], start=1):
         st.markdown(f"{idx}. {step}")
-    st.caption("Suggestions are guidance-oriented and should be interpreted with clinical context.")
+    st.markdown("**Longer-term tracking suggestion**")
+    for idx, step in enumerate(next_steps["long_term"], start=1):
+        st.markdown(f"{idx}. {step}")
+    st.caption("Guidance is linked to current analysis signals and should be interpreted with clinical context.")
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
@@ -1015,6 +1138,7 @@ def render_clinical_dashboard(user, live_stats, health_score, percentile, risk_p
             st.markdown(f"**{title}**")
             st.markdown(f"<span class='risk-badge'>{level}</span>", unsafe_allow_html=True)
             st.markdown(f"### {score}/100")
+            st.caption(get_risk_plain_language(key, level))
             st.caption(get_risk_interpretation(title, score))
             st.progress(min(max(score, 0), 100))
             st.markdown('</div>', unsafe_allow_html=True)
