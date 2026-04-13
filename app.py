@@ -112,6 +112,7 @@ st.markdown("""
     .workflow-stage:hover { background: #f2eee7; }
     .workflow-stage.current { border-color: var(--color-accent); background: #f5ece0; }
     .workflow-stage.done { border-color: var(--color-success); background: #eef3ec; }
+    .workflow-stage.ready { border-color: #4b6f57; background: #e6efe8; box-shadow: 0 0 0 1px rgba(109,138,99,0.2) inset; }
     .workflow-stage.disabled { opacity: 0.72; }
     .workflow-stage-icon { font-size: 0.85rem; margin-bottom: 2px; }
     .study-card {
@@ -222,6 +223,58 @@ st.markdown("""
         width: 480px;
         border-radius: 12px;
         border: 1px solid var(--color-border);
+    }
+
+    .final-output-zone {
+        background: linear-gradient(180deg, #f8f6f1 0%, #f3f0e8 100%);
+        border: 1px solid #d6d2c9;
+        border-radius: 14px;
+        padding: 16px;
+        margin-top: 16px;
+        margin-bottom: 16px;
+    }
+    .finalization-card {
+        background: #fcfbf8;
+        border: 1px solid #d9d7d2;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 12px;
+    }
+    .report-header-grid {
+        display: grid;
+        grid-template-columns: 2fr 1.2fr 1.2fr;
+        gap: 10px;
+        margin: 10px 0 12px 0;
+    }
+    .report-header-cell {
+        border: 1px solid #ddd8ce;
+        border-radius: 10px;
+        background: #fbfaf7;
+        padding: 10px;
+    }
+    .report-status-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        font-weight: 600;
+        border: 1px solid #9fb09a;
+        color: #2e4a35;
+        background: #e8f2e6;
+    }
+    .report-narrative-shell {
+        border: 1px solid #d8d4ca;
+        border-radius: 12px;
+        background: #fffefb;
+        padding: 18px;
+    }
+    .report-narrative-body {
+        max-width: 860px;
+        margin: 0 auto;
+        line-height: 1.75;
+        font-size: 0.98rem;
+        color: #243b44;
+        white-space: pre-wrap;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -411,7 +464,7 @@ def get_workflow_stage_index():
     if st.session_state.get('analysis_requested', False) and st.session_state.get('user_data') and not st.session_state.get('inference_done', False):
         return 4
     if st.session_state.get('inference_done', False) and not st.session_state.get('report_generated', False):
-        return 5
+        return 6
     if st.session_state.get('report_generated', False):
         return 6
     return 2
@@ -445,8 +498,12 @@ def render_workflow_strip():
     current = get_workflow_stage_index()
     icons = {1: "①", 2: "②", 3: "③", 4: "④", 5: "⑤", 6: "⑥"}
     cards = []
+    report_ready = st.session_state.get('report_generated', False)
     for i, name in enumerate(stages, start=1):
-        if i < current:
+        if i == 6 and report_ready:
+            status_class = "ready"
+            stage_icon = "✅"
+        elif i < current:
             status_class = "done"
             stage_icon = "✅"
         elif i == current:
@@ -1076,18 +1133,44 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
 
     # ---------------- 狀態三：生成專業報告 ----------------
     if st.session_state.get('inference_done', False):
-        st.markdown('<div class="layer-wrap"><div class="section-title">Final Output Zone</div>', unsafe_allow_html=True)
+        st.markdown('<div class="final-output-zone"><div class="section-title">Final Clinical Report Zone</div>', unsafe_allow_html=True)
         if 'report_generated' not in st.session_state:
             st.session_state.report_generated = False
         if 'report_content' not in st.session_state:
             st.session_state.report_content = None
         if 'pdf_bytes' not in st.session_state:
             st.session_state.pdf_bytes = None
+        if 'report_generated_at' not in st.session_state:
+            st.session_state.report_generated_at = None
 
-        if st.button("✅ Generate Validated Report", type="primary", use_container_width=True):
+        st.markdown(
+            f"""
+            <div class="finalization-card">
+                <div class="micro-label">Stage 6 · Finalization</div>
+                <div class="panel-title">Prepare validated report for formal delivery</div>
+                <div class="body-text">Complete finalization and generate the final clinical narrative package.</div>
+                <div style="margin-top:10px;">
+                    <span class="badge-muted">Subject ID: {user['name']}</span>
+                    <span class="badge-muted">Age/Gender: {user['age']} / {user['gender']}</span>
+                    <span class="badge-muted">FOV: {user['fov']} mm</span>
+                    <span class="badge-muted">Analysis Date: {date.today().strftime("%Y-%m-%d")}</span>
+                </div>
+                <div style="margin-top:8px;">
+                    <span class="badge-muted">Manual Validation Count: {manual_count}</span>
+                    <span class="badge-muted">Health Score: {health_score}</span>
+                    <span class="badge-muted">Density: {final_density:.2f} loops/mm</span>
+                    <span class="badge-muted">Diagnostic Flag: {risk_profile['diagnostic_flag']}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        if st.button("Generate Final Clinical Report", type="primary", use_container_width=True):
             st.session_state.report_generated = True
             st.session_state.report_content = None
             st.session_state.pdf_bytes = None
+            st.session_state.report_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if st.session_state.report_generated:
             if st.session_state.report_content is None:
@@ -1138,9 +1221,6 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                 4. **Conclusion**: Provide a standard medical summary. Incorporate the "System Generated Flag" narrative logically into your closing clinical advice.
                 """
                
-                st.markdown("---")
-                st.markdown('<div class="section-title">📑 Clinical Pathology Report</div>', unsafe_allow_html=True)
-               
                 try:
                     with st.spinner("Synthesizing Validated Clinical Report..."):
                         if USE_NEW_GENAI:
@@ -1160,28 +1240,74 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                             user_data=user, stats=live_stats, health_score=health_score,  
                             density=final_density, ai_text=response.text, overlay_image_rgb=final_overlay_for_report
                         )
+                        st.success("Report successfully generated.")
                 except Exception as e:
                     st.error(f"Generation Error: {e}")
                     import traceback
                     st.text(traceback.format_exc())
 
             if st.session_state.report_content:
-                st.markdown(f'<div class="paper-container">{st.session_state.report_content}</div>', unsafe_allow_html=True)
+                generated_at = st.session_state.get('report_generated_at', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                st.markdown(
+                    f"""
+                    <div class="finalization-card">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+                            <div>
+                                <div class="micro-label">Final Deliverable</div>
+                                <div class="section-title" style="margin-bottom:4px;">Final Clinical Report</div>
+                                <div class="caption-text">Validated clinical narrative and PDF package for formal handoff.</div>
+                            </div>
+                            <div class="report-status-badge">Validated</div>
+                        </div>
+                        <div class="report-header-grid">
+                            <div class="report-header-cell">
+                                <div class="micro-label">Subject Summary</div>
+                                <div class="caption-text"><b>ID:</b> {user['name']}</div>
+                                <div class="caption-text"><b>Age/Gender:</b> {user['age']} / {user['gender']}</div>
+                                <div class="caption-text"><b>FOV:</b> {user['fov']} mm</div>
+                            </div>
+                            <div class="report-header-cell">
+                                <div class="micro-label">Study Summary</div>
+                                <div class="caption-text"><b>Analysis Date:</b> {date.today().strftime("%Y-%m-%d")}</div>
+                                <div class="caption-text"><b>Manual Validation:</b> {manual_count}</div>
+                                <div class="caption-text"><b>Diagnostic Flag:</b> {risk_profile['diagnostic_flag']}</div>
+                            </div>
+                            <div class="report-header-cell">
+                                <div class="micro-label">Report Status</div>
+                                <div class="caption-text"><b>Status:</b> Generated / Ready for Download</div>
+                                <div class="caption-text"><b>Timestamp:</b> {generated_at}</div>
+                                <div class="caption-text"><b>Health Score:</b> {health_score} · <b>Density:</b> {final_density:.2f}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                st.markdown(
+                    f"""
+                    <div class="report-narrative-shell">
+                        <div class="panel-title">Clinical Narrative</div>
+                        <div class="report-narrative-body">{st.session_state.report_content}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
                 st.markdown("<br>", unsafe_allow_html=True)
                 display_reference_table()
 
                 st.markdown("---")
-                col_dl, col_reset = st.columns([1, 1])
+                col_dl, col_reset = st.columns([1.6, 1])
                 with col_dl:
                     st.download_button(
-                        label="📄 Download Validated Professional Report (PDF)", 
+                        label="Download Validated PDF Report", 
                         data=st.session_state.pdf_bytes,
                         file_name=f"Report_{user['name']}_Validated.pdf", 
                         mime="application/pdf", 
+                        type="primary",
                         use_container_width=True
                     )
                 with col_reset:
-                    if st.button("🔄 Analyze Next Subject", use_container_width=True):
+                    if st.button("Start New Analysis", use_container_width=True):
                         # 徹底重置狀態
                         st.session_state.run_analysis = False
                         st.session_state.inference_done = False
@@ -1190,6 +1316,7 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                         st.session_state.report_generated = False
                         st.session_state.report_content = None
                         st.session_state.pdf_bytes = None
+                        st.session_state.report_generated_at = None
                         st.session_state.confirmed_file = False
                         st.session_state.selected_local_file = None
                         st.session_state.manual_uploaded_file = None
