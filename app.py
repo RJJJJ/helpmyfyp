@@ -158,7 +158,61 @@ st.markdown("""
     .viewer-panel {
         background: var(--color-viewer-dark);
         border-radius: var(--radius-md);
-        padding: 8px;
+        padding: 12px;
+        border: 1px solid #2f3b42;
+    }
+    .viewer-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #d9e2e7;
+        margin-bottom: 8px;
+    }
+    .viewer-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #e6eef2;
+    }
+    .workstation-strip {
+        background: #263238;
+        border: 1px solid #324147;
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 10px;
+    }
+    .clinical-card {
+        background: #fbfaf7;
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+    }
+    .risk-card {
+        background: #f8f7f4;
+        border: 1px solid #d8d5cf;
+        border-radius: 10px;
+        padding: 12px;
+        min-height: 170px;
+    }
+    .risk-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        background: #ece9e2;
+        border: 1px solid #d5d0c8;
+        color: #4b5f65;
+    }
+    .audit-row {
+        border: 1px solid #ddd9d2;
+        border-radius: 8px;
+        background: #fcfbf9;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+    }
+    .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
     [data-testid="stMetricLabel"] { font-size: 0.84rem !important; font-weight: 600 !important; color: var(--color-secondary) !important; }
@@ -606,6 +660,169 @@ def render_stage4_readiness():
         st.session_state.run_analysis = True
         st.rerun()
 
+def get_risk_interpretation(risk_name, score):
+    if score >= 70:
+        level_text = "High"
+    elif score >= 40:
+        level_text = "Moderate"
+    else:
+        level_text = "Low"
+    return f"{risk_name} risk is {level_text.lower()}, suggesting closer longitudinal follow-up."
+
+def render_viewer_workspace():
+    st.markdown(
+        """
+        <div class="viewer-panel">
+            <div class="viewer-header">
+                <div class="viewer-title">Imaging Workstation Viewer</div>
+                <span class="risk-badge">Review Mode</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    tabs = st.tabs(["Raw", "Overlay", "Validated"])
+    with tabs[0]:
+        st.image(st.session_state.processed_original, caption="Raw Input", use_container_width=True)
+
+    with tabs[1]:
+        st.image(st.session_state.base_overlay, caption="AI Overlay", use_container_width=True)
+
+    with tabs[2]:
+        display_img = st.session_state.base_overlay.copy()
+        label_map = {"Normal": "N", "Abnormal": "A", "Hemorrhage": "H", "Aggregation": "Ag", "Blur": "B"}
+
+        for region in st.session_state.manual_regions:
+            region_color = UI_COLOR_MAP.get(region['type'], (255, 255, 255))
+            if 'contour' in region:
+                inference.draw_filled_highlight(display_img, region['contour'], color=region_color, alpha=0.5)
+            else:
+                cv2.circle(display_img, (region['x'], region['y']), 15, region_color, 2)
+
+            label_short = label_map.get(region['type'], region['type'][0])
+            cv2.putText(display_img, label_short, (region['x']-9, region['y']-19), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 3)
+            cv2.putText(display_img, label_short, (region['x']-10, region['y']-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+
+        pil_image = Image.fromarray(display_img)
+        value = streamlit_image_coordinates(pil_image, key="click_interaction", use_column_width=True)
+
+        if value is not None:
+            x, y = value['x'], value['y']
+            last_pt = st.session_state.last_clicked_coords
+            is_new_click = True
+            if last_pt and abs(last_pt[0] - x) < 10 and abs(last_pt[1] - y) < 10:
+                is_new_click = False
+
+            if is_new_click:
+                st.session_state.last_clicked_coords = (x, y)
+                interaction_mode = st.session_state.get('interaction_mode_state', "🪄 Add (Magic Wand)")
+
+                if "Add" in interaction_mode:
+                    annotate_popup(x, y)
+                elif "Delete" in interaction_mode:
+                    mask = st.session_state.cleaned_mask
+                    if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x] > 0:
+                        class_name = inference.CLASSES.get(mask[y, x])
+                        h, w = mask.shape
+                        ff_mask1, ff_mask2 = np.zeros((h+2, w+2), np.uint8), np.zeros((h+2, w+2), np.uint8)
+                        cv2.floodFill(mask, ff_mask1, (x, y), 0, flags=4)
+                        cv2.floodFill(st.session_state.raw_mask, ff_mask2, (x, y), 0, flags=4)
+
+                        if class_name in st.session_state.stats and st.session_state.stats[class_name] > 0:
+                            st.session_state.stats[class_name] -= 1
+
+                        st.session_state.base_overlay = inference.draw_result_on_image(st.session_state.processed_original, mask)
+                        st.session_state.cleaned_mask = mask
+                        st.rerun()
+                    else:
+                        st.toast("⚠️ No AI prediction found at this location.", icon="⚠️")
+
+    st.markdown('<div class="workstation-strip">', unsafe_allow_html=True)
+    st.markdown('<div class="micro-label">Workstation Control Strip</div>', unsafe_allow_html=True)
+    st.radio("Interaction Tool", ["🪄 Add (Magic Wand)", "🗑️ Delete (Remove Prediction)"], horizontal=True, key="interaction_mode_state", label_visibility="collapsed")
+    min_area = st.slider("Minimum Area Threshold (px)", 0, 1000, st.session_state.get('current_min_area', 100), 10)
+    if min_area != st.session_state.get('current_min_area', 100):
+        st.session_state.current_min_area = min_area
+        new_stats, new_cleaned_mask, new_overlay = inference.recalculate_overlay(st.session_state.processed_original, st.session_state.raw_mask, min_area)
+        st.session_state.stats, st.session_state.base_overlay, st.session_state.cleaned_mask = new_stats.copy(), new_overlay, new_cleaned_mask
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def render_clinical_dashboard(user, live_stats, health_score, percentile, risk_profile, auto_count, manual_count, final_density):
+    ctx = get_selected_study_context()
+    st.markdown("### Clinical Review Dashboard")
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### 1) Subject / Study Summary")
+    render_subject_context_card(show_edit=True)
+    sum_c1, sum_c2, sum_c3 = st.columns(3)
+    sum_c1.markdown(f"**Analysis Status**  \n`Completed`")
+    sum_c2.markdown(f"**Validated Count**  \n`{manual_count}`")
+    sum_c3.markdown(f"**Review Timestamp**  \n`{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}`")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### 2) Key Clinical Metrics")
+    st.caption(f"Study `{ctx['study_id']}` — score beats **{percentile}%** of reference cohort.")
+    st.altair_chart(plot_health_score_bar(health_score), use_container_width=True)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Overall Health Score", f"{health_score}")
+    m2.metric("Live Density", f"{final_density:.1f}/mm")
+    m3.metric("Auto Count", f"{auto_count}")
+    m4.metric("Physician Added", f"+{manual_count}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### 3) Risk Indices")
+    risk_defs = [
+        ("Structural Damage", "structural"),
+        ("Raynaud's Risk", "raynaud"),
+        ("Edema / Inflammation", "edema"),
+    ]
+    rcols = st.columns(3)
+    for col, (title, key) in zip(rcols, risk_defs):
+        score = int(risk_profile['risks'][key])
+        level = risk_profile['risk_levels'][key]
+        with col:
+            st.markdown('<div class="risk-card">', unsafe_allow_html=True)
+            st.markdown(f"**{title}**")
+            st.markdown(f"<span class='risk-badge'>{level}</span>", unsafe_allow_html=True)
+            st.markdown(f"### {score}/100")
+            st.caption(get_risk_interpretation(title, score))
+            st.progress(min(max(score, 0), 100))
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.info(f"Diagnostic Flag: {risk_profile['diagnostic_flag']}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### 4) Morphology Composition")
+    st.altair_chart(plot_capillary_distribution(live_stats), use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### 5) Validation Audit Log")
+    if not st.session_state.manual_regions:
+        st.write("No manual validation records.")
+    else:
+        for i, r in enumerate(st.session_state.manual_regions):
+            left, right = st.columns([6, 1])
+            with left:
+                st.markdown(
+                    f"""
+                    <div class="audit-row">
+                        <span class="risk-badge">{r['type']}</span>
+                        <span class="mono">({r['x']}, {r['y']})</span><br/>
+                        <span class="caption-text">Source: manual / physician · Entry #{i+1:03d}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            with right:
+                if st.button("Delete", key=f"del_audit_{i}", use_container_width=True):
+                    st.session_state.manual_regions.pop(i)
+                    st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
 # ================= 2. DATA INPUT DIALOG =================
 @st.dialog("🧪 Subject & Clinical Metadata")
 def get_patient_info():
@@ -816,77 +1033,13 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
 
     # ---------------- 狀態二：推論完成 (顯示 4:6 控制台與數據面版) ----------------
     else:
-        render_subject_context_card(uploaded_file=uploaded_file, show_edit=True)
         col_left, col_right = st.columns([4, 6], gap="large")
 
-        # 🔴 左半部：視覺與互動控制
+        # 🔴 左半部：影像工作站
         with col_left:
-            st.markdown('<div class="card-header">📷 Microscopic View</div>', unsafe_allow_html=True)
-            with st.container(border=True):
-                show_raw = st.toggle("👁️ Show Raw Input", value=False)
-                if show_raw:
-                    st.image(st.session_state.processed_original, caption="Raw Input", use_container_width=True)
-                else:
-                    display_img = st.session_state.base_overlay.copy()
-                    label_map = {"Normal": "N", "Abnormal": "A", "Hemorrhage": "H", "Aggregation": "Ag", "Blur": "B"}
-                    
-                    for region in st.session_state.manual_regions:
-                        region_color = UI_COLOR_MAP.get(region['type'], (255, 255, 255))
-                        if 'contour' in region:
-                            inference.draw_filled_highlight(display_img, region['contour'], color=region_color, alpha=0.5)
-                        else:
-                            cv2.circle(display_img, (region['x'], region['y']), 15, region_color, 2)
-                        
-                        label_short = label_map.get(region['type'], region['type'][0])
-                        cv2.putText(display_img, label_short, (region['x']-9, region['y']-19), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,0), 3)
-                        cv2.putText(display_img, label_short, (region['x']-10, region['y']-20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+            render_viewer_workspace()
 
-                    pil_image = Image.fromarray(display_img)
-                    value = streamlit_image_coordinates(pil_image, key="click_interaction", use_column_width=True)
-
-                    if value is not None:
-                        x, y = value['x'], value['y']
-                        last_pt = st.session_state.last_clicked_coords
-                        is_new_click = True
-                        if last_pt and abs(last_pt[0] - x) < 10 and abs(last_pt[1] - y) < 10:
-                            is_new_click = False
-                        
-                        if is_new_click:
-                            st.session_state.last_clicked_coords = (x, y)
-                            interaction_mode = st.session_state.get('interaction_mode_state', "🪄 Add (Magic Wand)")
-                            
-                            if "Add" in interaction_mode:
-                                annotate_popup(x, y)
-                            elif "Delete" in interaction_mode:
-                                mask = st.session_state.cleaned_mask
-                                if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x] > 0:
-                                    class_name = inference.CLASSES.get(mask[y, x])
-                                    h, w = mask.shape
-                                    ff_mask1, ff_mask2 = np.zeros((h+2, w+2), np.uint8), np.zeros((h+2, w+2), np.uint8)
-                                    cv2.floodFill(mask, ff_mask1, (x, y), 0, flags=4)
-                                    cv2.floodFill(st.session_state.raw_mask, ff_mask2, (x, y), 0, flags=4)
-
-                                    if class_name in st.session_state.stats and st.session_state.stats[class_name] > 0:
-                                        st.session_state.stats[class_name] -= 1
-
-                                    st.session_state.base_overlay = inference.draw_result_on_image(st.session_state.processed_original, mask)
-                                    st.session_state.cleaned_mask = mask
-                                    st.rerun()
-                                else:
-                                    st.toast("⚠️ No AI prediction found at this location.", icon="⚠️")
-
-            st.markdown('<div class="card-header">🛠️ Interactive Tools</div>', unsafe_allow_html=True)
-            with st.container(border=True):
-                st.radio("🔧 Interaction Mode:", ["🪄 Add (Magic Wand)", "🗑️ Delete (Remove Prediction)"], horizontal=True, key="interaction_mode_state")
-                min_area = st.slider("Minimum Area Threshold (px)", 0, 1000, st.session_state.get('current_min_area', 100), 10)
-                
-                if min_area != st.session_state.get('current_min_area', 100):
-                    st.session_state.current_min_area = min_area
-                    new_stats, new_cleaned_mask, new_overlay = inference.recalculate_overlay(st.session_state.processed_original, st.session_state.raw_mask, min_area)
-                    st.session_state.stats, st.session_state.base_overlay, st.session_state.cleaned_mask = new_stats.copy(), new_overlay, new_cleaned_mask
-                    st.rerun()
-
-        # 🟢 右半部：數據與風險分析
+        # 🟢 右半部：Clinical dashboard
         with col_right:
             user = st.session_state.user_data
             
@@ -910,45 +1063,16 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
 
             profiler = ClinicalRiskProfiler(stats=live_stats, fov=user['fov'])
             risk_profile = profiler.analyze()
-
-            st.markdown('<div class="card-header">📊 Live Clinical Metrics</div>', unsafe_allow_html=True)
-            with st.container(border=True):
-                st.markdown(f"<span style='color: #666;'>Demographic Standings: Your score beats **{percentile}%** of the regional demographic.</span>", unsafe_allow_html=True)
-                st.altair_chart(plot_health_score_bar(health_score), use_container_width=True)
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Live Density", f"{final_density:.1f}/mm")
-                m2.metric("Auto Count", f"{auto_count}")
-                m3.metric("Physician Added", f"+{manual_count}")
-
-            st.write("") 
-            st.markdown('<div class="card-header">⚠️ Clinical Risk Indices</div>', unsafe_allow_html=True)
-            with st.container(border=True):
-                r1, r2, r3 = st.columns(3)
-                r1.metric("Structural Damage", f"{risk_profile['risks']['structural']}", risk_profile['risk_levels']['structural'], delta_color="inverse")
-                r2.metric("Raynaud's Risk", f"{risk_profile['risks']['raynaud']}", risk_profile['risk_levels']['raynaud'], delta_color="inverse")
-                r3.metric("Edema / Inflam.", f"{risk_profile['risks']['edema']}", risk_profile['risk_levels']['edema'], delta_color="inverse")
-                st.info(f"**Diagnostic Flag:** {risk_profile['diagnostic_flag']}")
-
-            st.write("") 
-            c_chart, c_valid = st.columns([1.5, 1], gap="medium")
-            
-            with c_chart:
-                st.markdown('<div class="card-header">🔬 Composition</div>', unsafe_allow_html=True)
-                with st.container(border=True):
-                    st.altair_chart(plot_capillary_distribution(live_stats), use_container_width=True)
-            
-            with c_valid:
-                st.markdown('<div class="card-header">✅ Validated Regions</div>', unsafe_allow_html=True)
-                with st.container(border=True):
-                    if not st.session_state.manual_regions:
-                        st.write("No manual validations.")
-                    else:
-                        for i, r in enumerate(st.session_state.manual_regions):
-                            col_t, col_d = st.columns([4, 1])
-                            col_t.markdown(f"**{r['type']}** `({r['x']}, {r['y']})`")
-                            if col_d.button("🗑️", key=f"del_list_{i}", use_container_width=True):
-                                st.session_state.manual_regions.pop(i)
-                                st.rerun()
+            render_clinical_dashboard(
+                user=user,
+                live_stats=live_stats,
+                health_score=health_score,
+                percentile=percentile,
+                risk_profile=risk_profile,
+                auto_count=auto_count,
+                manual_count=manual_count,
+                final_density=final_density
+            )
 
     # ---------------- 狀態三：生成專業報告 ----------------
     if st.session_state.get('inference_done', False):
