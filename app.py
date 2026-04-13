@@ -113,6 +113,40 @@ st.markdown("""
     .workflow-stage.current { border-color: var(--color-accent); background: #f5ece0; }
     .workflow-stage.done { border-color: var(--color-success); background: #eef3ec; }
     .workflow-stage.disabled { opacity: 0.72; }
+    .workflow-stage-icon { font-size: 0.85rem; margin-bottom: 2px; }
+    .study-card {
+        border: 1px solid var(--color-border);
+        border-radius: 10px;
+        background: #fbfaf7;
+        padding: 10px;
+        min-height: 320px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .study-meta-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-top: 8px;
+    }
+    .study-summary-card {
+        border: 1px solid var(--color-border);
+        border-radius: 10px;
+        background: #fbfaf7;
+        padding: 12px;
+        min-height: 280px;
+    }
+    .badge-muted {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        border: 1px solid #d8d5cf;
+        color: #4d6268;
+        background: #f4f2ee;
+        margin-right: 6px;
+    }
 
     .card-panel {
         background: var(--color-surface);
@@ -311,6 +345,8 @@ def plot_gaussian_comparison(density_val):
 def get_workflow_stage_index():
     """Returns current workflow index (1-6) for UI strip rendering only."""
     if not st.session_state.get('confirmed_file', False):
+        if st.session_state.get('is_previewing', False):
+            return 2
         return 1
     if st.session_state.get('confirmed_file', False) and not st.session_state.get('analysis_requested', False):
         return 2
@@ -351,17 +387,22 @@ def render_workflow_strip():
         "Generate Report",
     ]
     current = get_workflow_stage_index()
+    icons = {1: "①", 2: "②", 3: "③", 4: "④", 5: "⑤", 6: "⑥"}
     cards = []
     for i, name in enumerate(stages, start=1):
         if i < current:
             status_class = "done"
+            stage_icon = "✅"
         elif i == current:
             status_class = "current"
+            stage_icon = icons[i]
         else:
             status_class = "disabled"
+            stage_icon = icons[i]
         cards.append(
             f"""
             <div class="workflow-stage {status_class}">
+                <div class="workflow-stage-icon">{stage_icon}</div>
                 <div class="micro-label">Stage {i}</div>
                 <div class="caption-text"><b>{name}</b></div>
             </div>
@@ -378,6 +419,137 @@ def render_workflow_strip():
         """,
         unsafe_allow_html=True
     )
+
+def collect_device_studies(img_dir="machine/Guests-Image/Guest"):
+    studies = []
+    if os.path.exists(img_dir):
+        for f in os.listdir(img_dir):
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                full_path = os.path.join(img_dir, f)
+                studies.append({
+                    "path": full_path,
+                    "filename": os.path.basename(full_path),
+                    "study_id": os.path.splitext(os.path.basename(full_path))[0],
+                    "capture_time": datetime.fromtimestamp(os.path.getmtime(full_path)).strftime("%Y-%m-%d %H:%M"),
+                    "source": "Device",
+                    "status": "Available"
+                })
+    studies.sort(key=lambda x: os.path.getmtime(x["path"]), reverse=True)
+    return studies
+
+def render_study_browser():
+    studies = collect_device_studies()
+    if st.session_state.get("manual_uploaded_file") is not None:
+        manual_name = st.session_state.manual_uploaded_file.name
+        studies.insert(0, {
+            "path": None,
+            "filename": manual_name,
+            "study_id": f"upload-{os.path.splitext(manual_name)[0]}",
+            "capture_time": "Session Upload",
+            "source": "Uploaded",
+            "status": "Ready"
+        })
+
+    top_l, top_m, top_r, top_f = st.columns([3, 1.3, 1, 2])
+    with top_l:
+        st.markdown("### Study Browser")
+        st.caption("Structured imaging studies for selection and verification")
+    with top_m:
+        st.metric("Total Studies", len(studies))
+    with top_r:
+        if st.button("Refresh", use_container_width=True):
+            st.rerun()
+    with top_f:
+        st.selectbox("Filter (placeholder)", ["Recent", "Device", "Uploaded"], index=0)
+
+    manual_upload = st.file_uploader("Add Study (Manual Upload)", type=["jpg", "png", "jpeg", "bmp"])
+    if manual_upload is not None:
+        st.session_state.manual_uploaded_file = manual_upload
+        st.session_state.selected_local_file = None
+        st.session_state.upload_source = "manual"
+        st.session_state.is_previewing = True
+        st.rerun()
+
+    if not studies:
+        st.info("No studies found. Use manual upload to add a study.")
+        return
+
+    grid_cols = 3
+    for i in range(0, len(studies), grid_cols):
+        cols = st.columns(grid_cols)
+        for j, col in enumerate(cols):
+            if i + j >= len(studies):
+                continue
+            study = studies[i + j]
+            with col:
+                st.markdown('<div class="study-card">', unsafe_allow_html=True)
+                if study["source"] == "Device" and study["path"]:
+                    st.image(Image.open(study["path"]), use_container_width=True)
+                else:
+                    st.image(st.session_state.manual_uploaded_file, use_container_width=True)
+
+                st.markdown(f"**{study['study_id']}**")
+                st.markdown(f"<span class='badge-muted'>{study['source']}</span><span class='badge-muted'>{study['status']}</span>", unsafe_allow_html=True)
+                st.caption(f"Capture: {study['capture_time']}")
+                open_key = f"open_study_{i+j}"
+                if st.button("Open Study", key=open_key, use_container_width=True):
+                    if study["source"] == "Device":
+                        st.session_state.selected_local_file = study["path"]
+                        st.session_state.upload_source = "device"
+                    else:
+                        st.session_state.selected_local_file = None
+                        st.session_state.upload_source = "manual"
+                    st.session_state.is_previewing = True
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+def render_confirm_input():
+    selected_source = st.session_state.get("upload_source")
+    selected_name = "N/A"
+    capture_time = "N/A"
+    preview_obj = None
+    status = "Ready for confirmation"
+
+    if selected_source == "device" and st.session_state.get("selected_local_file"):
+        fpath = st.session_state.selected_local_file
+        selected_name = os.path.basename(fpath)
+        preview_obj = Image.open(fpath)
+        capture_time = datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%d %H:%M")
+    elif selected_source == "manual" and st.session_state.get("manual_uploaded_file"):
+        up = st.session_state.manual_uploaded_file
+        selected_name = up.name
+        preview_obj = up
+        capture_time = "Session Upload"
+
+    st.markdown("### Confirm Input")
+    left, right = st.columns([3, 2], gap="large")
+    with left:
+        if preview_obj is not None:
+            st.image(preview_obj, caption=f"Preview: {selected_name}", use_container_width=True)
+        else:
+            st.warning("No study selected.")
+    with right:
+        st.markdown('<div class="study-summary-card">', unsafe_allow_html=True)
+        st.markdown("#### Study Summary")
+        st.markdown(f"**Study/File ID**: `{selected_name}`")
+        st.markdown(f"**Source**: {selected_source.capitalize() if selected_source else 'N/A'}")
+        st.markdown(f"**Capture Time**: {capture_time}")
+        st.markdown(f"**Status**: {status}")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1.5, 0.2, 2])
+    with c1:
+        if st.button("Back to Gallery", use_container_width=True):
+            st.session_state.is_previewing = False
+            st.session_state.selected_local_file = None
+            if st.session_state.get("upload_source") == "manual":
+                st.session_state.manual_uploaded_file = None
+            st.rerun()
+    with c3:
+        if st.button("Confirm Input", type="primary", use_container_width=True):
+            st.session_state.is_previewing = False
+            st.session_state.confirmed_file = True
+            st.rerun()
 
 # ================= 2. DATA INPUT DIALOG =================
 @st.dialog("🧪 Subject & Clinical Metadata")
@@ -489,78 +661,10 @@ uploaded_file = None
 show_gallery = not st.session_state.confirmed_file
 
 if show_gallery:
-    if st.session_state.is_previewing and st.session_state.selected_local_file:
-        st.markdown("### 🔍 Image Preview & Confirmation")
-        col_img_left, col_img_center, col_img_right = st.columns([1, 3, 1])
-        with col_img_center:
-            preview_img = Image.open(st.session_state.selected_local_file)
-            st.image(preview_img, caption=os.path.basename(st.session_state.selected_local_file), use_container_width=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-            col_btn_back, col_btn_confirm = st.columns(2)
-            
-            if col_btn_back.button("🔙 Back to Gallery", use_container_width=True):
-                st.session_state.is_previewing = False
-                st.session_state.selected_local_file = None
-                st.rerun()
-                    
-            if col_btn_confirm.button("✅ Confirm & Analyze", type="primary", use_container_width=True):
-                st.session_state.is_previewing = False
-                st.session_state.confirmed_file = True
-                st.session_state.upload_source = "device"
-                st.rerun()
+    if st.session_state.is_previewing:
+        render_confirm_input()
     else:
-        tab_device, tab_manual = st.tabs(["🖥️ Auto-Saved Captures (Device)", "📤 Manual Upload"])
-        with tab_device:
-            img_dir = "machine/Guests-Image/Guest"
-            valid_files = []
-            if os.path.exists(img_dir):
-                for f in os.listdir(img_dir):
-                    if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
-                        full_path = os.path.join(img_dir, f)
-                        valid_files.append((full_path, os.path.getmtime(full_path)))
-                valid_files.sort(key=lambda x: x[1], reverse=True)
-
-            if valid_files:
-                col_title, col_refresh = st.columns([5, 1])
-                with col_title: st.markdown("#### 🗂️ Complete Microscopic Gallery")
-                with col_refresh:
-                    if st.button("🔄 Refresh", use_container_width=True): st.rerun()
-
-                with st.container(height=650, border=True):
-                    grid_cols = 4 
-                    for i in range(0, len(valid_files), grid_cols):
-                        cols = st.columns(grid_cols)
-                        for j, col in enumerate(cols):
-                            if i + j < len(valid_files):
-                                fpath, mtime = valid_files[i+j]
-                                with col:
-                                    with st.container(border=True):
-                                        st.markdown('<div class="med-card-container">', unsafe_allow_html=True)
-                                        img = Image.open(fpath)
-                                        st.image(img, use_container_width=True)
-                                        fname = os.path.basename(fpath)
-                                        file_id = os.path.splitext(fname)[0]
-                                        dt_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-                                        
-                                        st.markdown(f'<div class="med-card-id" title="{file_id}">{file_id}</div>', unsafe_allow_html=True)
-                                        st.markdown(f'<div class="med-card-date">{dt_str}</div>', unsafe_allow_html=True)
-                                        st.markdown('</div>', unsafe_allow_html=True)
-                                        
-                                        if st.button("Load", key=f"btn_grid_{i+j}", use_container_width=True):
-                                            st.session_state.selected_local_file = fpath
-                                            st.session_state.is_previewing = True
-                                            st.rerun()
-            else:
-                st.info(f"No images found in the directory: {img_dir}")
-
-        with tab_manual:
-            manual_upload = st.file_uploader("Upload Microscopy Image", type=["jpg", "png", "jpeg", "bmp"])
-            if manual_upload is not None:
-                st.session_state.selected_local_file = None 
-                st.session_state.manual_uploaded_file = manual_upload
-                st.session_state.confirmed_file = True
-                st.session_state.upload_source = "manual"
-                st.rerun()
+        render_study_browser()
 
 # === File Consolidation & Auto-Trigger Dialog ===
 if st.session_state.confirmed_file:
@@ -585,34 +689,47 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
     
     # ---------------- 狀態一：尚未完成分析 (置中顯示確認介面) ----------------
     if not st.session_state.get('inference_done', False):
-        col_space_left, col_center, col_space_right = st.columns([1, 2, 1])
-        with col_center:
-            st.markdown('<div class="card-header">📷 Confirm Image & Analyze</div>', unsafe_allow_html=True)
-            with st.container(border=True):
-                st.image(uploaded_file, caption="Raw Input", use_container_width=True)
-                
-                col_btn_back, col_btn_exec = st.columns(2)
-                with col_btn_back:
-                    if st.button("🔙 Back to Gallery", use_container_width=True):
-                        st.session_state.confirmed_file = False
-                        st.session_state.selected_local_file = None
-                        st.session_state.manual_uploaded_file = None
-                        st.session_state.open_patient_dialog = False
-                        st.session_state.analysis_requested = False
-                        st.rerun()
-                        
-                with col_btn_exec:
-                    if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
-                        if not api_key: 
-                            st.error("Error: API Key Missing.")
-                        else:
-                            st.session_state.analysis_requested = True
-                            if not st.session_state.get('user_data'):
-                                st.session_state.open_patient_dialog = True
-                            else:
-                                st.session_state.run_analysis = True
-                                st.session_state.inference_done = False
-                            st.rerun()
+        st.markdown("### Confirm Input")
+        left, right = st.columns([3, 2], gap="large")
+        with left:
+            st.image(uploaded_file, caption="Selected Input", use_container_width=True)
+        with right:
+            source = st.session_state.get('upload_source', 'N/A')
+            capture_time = "Session Upload"
+            study_name = getattr(uploaded_file, "name", "N/A")
+            if source == "device" and st.session_state.get("selected_local_file"):
+                fpath = st.session_state.selected_local_file
+                study_name = os.path.basename(fpath)
+                capture_time = datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%d %H:%M")
+            st.markdown('<div class="study-summary-card">', unsafe_allow_html=True)
+            st.markdown("#### Study Summary")
+            st.markdown(f"**Study/File ID**: `{study_name}`")
+            st.markdown(f"**Source**: {source.capitalize()}")
+            st.markdown(f"**Capture Time**: {capture_time}")
+            st.markdown("**Status**: Ready")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        col_btn_back, _, col_btn_exec = st.columns([1.5, 0.2, 2])
+        with col_btn_back:
+            if st.button("Back to Gallery", use_container_width=True):
+                st.session_state.confirmed_file = False
+                st.session_state.selected_local_file = None
+                st.session_state.manual_uploaded_file = None
+                st.session_state.open_patient_dialog = False
+                st.session_state.analysis_requested = False
+                st.rerun()
+        with col_btn_exec:
+            if st.button("Continue to Metadata", type="primary", use_container_width=True):
+                if not api_key: 
+                    st.error("Error: API Key Missing.")
+                else:
+                    st.session_state.analysis_requested = True
+                    if not st.session_state.get('user_data'):
+                        st.session_state.open_patient_dialog = True
+                    else:
+                        st.session_state.run_analysis = True
+                        st.session_state.inference_done = False
+                    st.rerun()
 
         # 背景推論邏輯 (當使用者填完彈出表單後才會觸發)
         if st.session_state.run_analysis and st.session_state.user_data and not st.session_state.inference_done:
