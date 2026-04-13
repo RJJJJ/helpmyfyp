@@ -34,62 +34,106 @@ except ImportError:
 st.set_page_config(layout="wide", page_title="Microcirculation Research Platform")
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
-    
-    /* 基礎字體設定 */
-    * { font-family: 'Roboto', sans-serif; }
-    
-    /* 頂部標題 */
-    .main-header {
-        font-size: 32px; 
-        font-weight: 700; 
-        color: #0e2a47; 
-        margin-bottom: 20px;
-        border-bottom: 3px solid #0e2a47;
-        padding-bottom: 10px;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+        --color-primary: #173B45;
+        --color-secondary: #5F7C82;
+        --color-bg: #F6F4EF;
+        --color-surface: #FCFBF8;
+        --color-viewer-dark: #20282D;
+        --color-accent: #C58B47;
+        --color-success: #6D8A63;
+        --color-warning: #C58B47;
+        --color-danger: #A45A52;
+        --color-info: #7A8E98;
+        --color-border: #d9d7d2;
+        --radius-md: 12px;
+        --space-md: 16px;
     }
-    
-    /* 統一的卡片設計 (Card Style) - 解決大小不一的關鍵 */
-    .st-card {
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        height: 100%; /* 讓並排的卡片高度自動延展到一致 */
-        transition: transform 0.2s ease-in-out;
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+        color: var(--color-primary);
     }
-    .st-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+
+    .stApp {
+        background: var(--color-bg);
     }
-    
-    /* 卡片內的標題 */
-    .card-header {
-        font-size: 18px;
-        font-weight: 700;
-        color: #2c3e50;
-        margin-bottom: 15px;
+
+    .layer-wrap {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 14px 16px;
+        margin-bottom: 14px;
+    }
+
+    .global-header {
         display: flex;
-        align-items: center;
-        gap: 8px;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
     }
 
-    /* 確保所有圖片都能響應式縮放，不超出容器 */
-    img {
-        max-width: 100%;
-        height: auto;
-        border-radius: 6px;
+    .page-title { font-size: 1.9rem; font-weight: 700; line-height: 1.2; letter-spacing: 0.01em; }
+    .section-title { font-size: 1.25rem; font-weight: 600; color: var(--color-primary); margin-bottom: 8px; }
+    .panel-title { font-size: 1rem; font-weight: 600; color: var(--color-primary); margin-bottom: 10px; }
+    .card-header { font-size: 1rem; font-weight: 600; color: var(--color-primary); margin-bottom: 10px; }
+    .body-text { font-size: 0.96rem; font-weight: 400; color: var(--color-secondary); }
+    .caption-text { font-size: 0.84rem; color: var(--color-secondary); }
+    .micro-label { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-info); font-weight: 600; }
+
+    .status-badge {
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid rgba(23, 59, 69, 0.25);
+        color: var(--color-primary);
+        background: rgba(95, 124, 130, 0.10);
+        white-space: nowrap;
     }
 
-    /* 微調 Metric 組件使其更緊湊 */
-    [data-testid="stMetricValue"] { font-size: 24px !important; }
-    [data-testid="stMetricLabel"] { font-weight: 600 !important; color: #555 !important; }
-    
-    /* Dialog 樣式微調 */
+    .workflow-strip {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(110px, 1fr));
+        gap: 10px;
+    }
+
+    .workflow-stage {
+        border: 1px solid var(--color-border);
+        border-radius: 10px;
+        background: #f8f6f1;
+        padding: 8px 10px;
+        min-height: 64px;
+        transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .workflow-stage:hover { background: #f2eee7; }
+    .workflow-stage.current { border-color: var(--color-accent); background: #f5ece0; }
+    .workflow-stage.done { border-color: var(--color-success); background: #eef3ec; }
+    .workflow-stage.disabled { opacity: 0.72; }
+
+    .card-panel {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: var(--space-md);
+    }
+
+    .viewer-panel {
+        background: var(--color-viewer-dark);
+        border-radius: var(--radius-md);
+        padding: 8px;
+    }
+
+    [data-testid="stMetricLabel"] { font-size: 0.84rem !important; font-weight: 600 !important; color: var(--color-secondary) !important; }
+    [data-testid="stMetricValue"] { font-size: 1.5rem !important; color: var(--color-primary) !important; }
+
     div[data-testid="stDialog"] div[role="dialog"] {
-        width: 450px; /* 稍微加寬讓輸入框不擁擠 */
+        width: 480px;
         border-radius: 12px;
+        border: 1px solid var(--color-border);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -264,6 +308,77 @@ def plot_gaussian_comparison(density_val):
     rule = alt.Chart(pd.DataFrame({'x': [density_val]})).mark_rule(color='red', size=4).encode(x='x')
     return (base + rule).properties(title="Comparison vs. Healthy Norm (Etehad Tavakol et al., 2015)", height=250)
 
+def get_workflow_stage_index():
+    """Returns current workflow index (1-6) for UI strip rendering only."""
+    if not st.session_state.get('confirmed_file', False):
+        return 1
+    if st.session_state.get('confirmed_file', False) and not st.session_state.get('analysis_requested', False):
+        return 2
+    if st.session_state.get('open_patient_dialog', False):
+        return 3
+    if st.session_state.get('run_analysis', False) and not st.session_state.get('inference_done', False):
+        return 4
+    if st.session_state.get('inference_done', False) and not st.session_state.get('report_generated', False):
+        return 5
+    if st.session_state.get('report_generated', False):
+        return 6
+    return 2
+
+def render_global_header():
+    st.markdown(
+        """
+        <div class="layer-wrap">
+            <div class="global-header">
+                <div>
+                    <div class="micro-label">Microcirculation Platform</div>
+                    <div class="page-title">Microcirculation Research Platform</div>
+                    <div class="body-text">Quantitative Nailfold Capillaroscopy Analysis</div>
+                </div>
+                <div class="status-badge">Research Prototype</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_workflow_strip():
+    stages = [
+        "Select Image",
+        "Confirm Input",
+        "Subject Metadata",
+        "Run Analysis",
+        "Review & Validate",
+        "Generate Report",
+    ]
+    current = get_workflow_stage_index()
+    cards = []
+    for i, name in enumerate(stages, start=1):
+        if i < current:
+            status_class = "done"
+        elif i == current:
+            status_class = "current"
+        else:
+            status_class = "disabled"
+        cards.append(
+            f"""
+            <div class="workflow-stage {status_class}">
+                <div class="micro-label">Stage {i}</div>
+                <div class="caption-text"><b>{name}</b></div>
+            </div>
+            """
+        )
+    st.markdown(
+        f"""
+        <div class="layer-wrap">
+            <div class="section-title">Workflow Strip</div>
+            <div class="workflow-strip">
+                {''.join(cards)}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # ================= 2. DATA INPUT DIALOG =================
 @st.dialog("🧪 Subject & Clinical Metadata")
 def get_patient_info():
@@ -344,8 +459,8 @@ def annotate_popup(x, y):
 #    EULAR Study Group
 #    """)
 
-st.markdown('<div class="main-header">🧬 Quantitative Nailfold Capillaroscopy System</div>', unsafe_allow_html=True)
-st.markdown("---")
+render_global_header()
+render_workflow_strip()
 # ================= MLOPS: PRE-LOADING & WARM-UP =================
 # 使用 session_state 作為絕對鎖，防止 Streamlit 瘋狂重複執行
 if 'model_loaded' not in st.session_state:
@@ -361,13 +476,14 @@ if not st.session_state.model_loaded:
 # ================= PACS-LIKE DUAL-TRACK IMAGE LOADING =================
 st.markdown("""
 <style>
-    .med-card-container { transition: transform 0.2s ease, box-shadow 0.2s ease; border-radius: 8px; }
-    .med-card-container:hover { transform: translateY(-3px); box-shadow: 0 8px 16px rgba(14, 42, 71, 0.1); }
-    .med-card-id { color: #0e2a47; font-weight: 800; font-size: 1.1em; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .med-card-date { color: #666666; font-size: 0.85em; font-weight: 300; margin-bottom: 8px; }
-    .badge-tag { background-color: #f0f4f8; color: #0e2a47; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; font-weight: bold; }
+    .med-card-container { transition: background 0.2s ease, border-color 0.2s ease; border-radius: 8px; }
+    .med-card-container:hover { background: #f7f3eb; }
+    .med-card-id { color: #173B45; font-weight: 700; font-size: 1em; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .med-card-date { color: #5F7C82; font-size: 0.82em; font-weight: 400; margin-bottom: 8px; }
 </style>
 """, unsafe_allow_html=True)
+
+st.markdown('<div class="layer-wrap"><div class="section-title">Main Workspace</div>', unsafe_allow_html=True)
 
 uploaded_file = None
 show_gallery = not st.session_state.confirmed_file
@@ -651,7 +767,7 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
 
     # ---------------- 狀態三：生成專業報告 ----------------
     if st.session_state.get('inference_done', False):
-        st.markdown("---") 
+        st.markdown('<div class="layer-wrap"><div class="section-title">Final Output Zone</div>', unsafe_allow_html=True)
         if 'report_generated' not in st.session_state:
             st.session_state.report_generated = False
         if 'report_content' not in st.session_state:
@@ -714,7 +830,7 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                 """
                
                 st.markdown("---")
-                st.markdown('<div class="main-header">📑 Clinical Pathology Report</div>', unsafe_allow_html=True)
+                st.markdown('<div class="section-title">📑 Clinical Pathology Report</div>', unsafe_allow_html=True)
                
                 try:
                     with st.spinner("Synthesizing Validated Clinical Report..."):
@@ -771,3 +887,6 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                         st.session_state.open_patient_dialog = False
                         st.session_state.analysis_requested = False
                         st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
