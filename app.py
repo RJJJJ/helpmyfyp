@@ -115,6 +115,8 @@ if 'confirmed_file' not in st.session_state: st.session_state.confirmed_file = F
 if 'selected_local_file' not in st.session_state: st.session_state.selected_local_file = None
 if 'manual_uploaded_file' not in st.session_state: st.session_state.manual_uploaded_file = None
 if 'upload_source' not in st.session_state: st.session_state.upload_source = None
+if 'open_patient_dialog' not in st.session_state: st.session_state.open_patient_dialog = False
+if 'analysis_requested' not in st.session_state: st.session_state.analysis_requested = False
 # ================= MLOPS: PRE-LOADING & WARM-UP =================
 # 在任何 UI 元件渲染之前，強制執行一次模型加載與預熱。
 # 由於使用了 @st.cache_resource，這段程式碼只會在伺服器重啟後的第一次載入時耗時。
@@ -281,6 +283,8 @@ def get_patient_info():
             st.session_state.run_analysis = True
             st.session_state.inference_done = False
             st.session_state.manual_regions = []
+            st.session_state.open_patient_dialog = False
+            st.session_state.analysis_requested = False
             st.rerun()
 
 @st.dialog("Define Morphology")
@@ -455,11 +459,9 @@ if st.session_state.confirmed_file:
     elif st.session_state.get('upload_source') == "manual" and st.session_state.get('manual_uploaded_file'):
         uploaded_file = st.session_state.manual_uploaded_file
 
-    if uploaded_file is not None and not st.session_state.get('user_data'):
-        if not api_key: 
-            st.error("Error: API Key Missing. Please check your .env file.")
-        else:
-            get_patient_info()
+# ================= SINGLE DIALOG RENDER POINT =================
+if st.session_state.get('open_patient_dialog', False):
+    get_patient_info()
 # ====================================================================
 # 佈局與分析核心邏輯 (嚴謹狀態機隔離)
 # ====================================================================
@@ -479,14 +481,22 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                         st.session_state.confirmed_file = False
                         st.session_state.selected_local_file = None
                         st.session_state.manual_uploaded_file = None
+                        st.session_state.open_patient_dialog = False
+                        st.session_state.analysis_requested = False
                         st.rerun()
                         
                 with col_btn_exec:
                     if st.button("🚀 Execute Analysis", type="primary", use_container_width=True):
                         if not api_key: 
                             st.error("Error: API Key Missing.")
-                        else: 
-                            get_patient_info()
+                        else:
+                            st.session_state.analysis_requested = True
+                            if not st.session_state.get('user_data'):
+                                st.session_state.open_patient_dialog = True
+                            else:
+                                st.session_state.run_analysis = True
+                                st.session_state.inference_done = False
+                            st.rerun()
 
         # 背景推論邏輯 (當使用者填完彈出表單後才會觸發)
         if st.session_state.run_analysis and st.session_state.user_data and not st.session_state.inference_done:
@@ -758,4 +768,6 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
                         st.session_state.confirmed_file = False
                         st.session_state.selected_local_file = None
                         st.session_state.manual_uploaded_file = None
+                        st.session_state.open_patient_dialog = False
+                        st.session_state.analysis_requested = False
                         st.rerun()
