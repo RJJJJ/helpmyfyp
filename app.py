@@ -276,6 +276,57 @@ st.markdown("""
         color: #243b44;
         white-space: pre-wrap;
     }
+    .hero-result-card {
+        background: linear-gradient(180deg, #fdfcf8 0%, #f7f4ec 100%);
+        border: 1px solid #d7d2c7;
+        border-radius: 14px;
+        padding: 18px;
+        margin-bottom: 12px;
+    }
+    .hero-score {
+        font-size: 3rem;
+        font-weight: 700;
+        line-height: 1.1;
+        color: #173B45;
+        margin: 6px 0 8px 0;
+    }
+    .hero-percentile {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #2a4f59;
+        margin-top: 4px;
+    }
+    .hero-summary {
+        font-size: 0.98rem;
+        color: #3f5960;
+        line-height: 1.6;
+        margin-top: 6px;
+    }
+    .grade-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid #d4d0c8;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-left: 8px;
+        vertical-align: middle;
+    }
+    .grade-excellent { background: #e8f2e6; border-color: #a9c5a2; color: #2e4a35; }
+    .grade-good { background: #edf3f6; border-color: #b9cad3; color: #294752; }
+    .grade-fair { background: #f8f0e4; border-color: #d9be97; color: #6d4d2b; }
+    .grade-attention { background: #f7e8e6; border-color: #d8ada7; color: #7a3f38; }
+    .result-label-chip {
+        display: inline-block;
+        margin-top: 10px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        border: 1px solid #d3d0c8;
+        background: #f4f2ed;
+        color: #3a4f56;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -726,6 +777,86 @@ def get_risk_interpretation(risk_name, score):
         level_text = "Low"
     return f"{risk_name} risk is {level_text.lower()}, suggesting closer longitudinal follow-up."
 
+def get_health_band(score):
+    score = float(score)
+    if score >= 85:
+        return {"label": "Excellent", "badge_class": "grade-excellent"}
+    if score >= 70:
+        return {"label": "Good", "badge_class": "grade-good"}
+    if score >= 55:
+        return {"label": "Fair", "badge_class": "grade-fair"}
+    return {"label": "Needs Attention", "badge_class": "grade-attention"}
+
+def get_percentile_text(percentile):
+    pct = int(round(percentile))
+    return f"Higher than {pct}% of comparable users", pct
+
+def get_personal_result_label(score, risk_profile, live_stats):
+    band = get_health_band(score)["label"]
+    levels = risk_profile.get("risk_levels", {})
+    high_risk_count = sum(1 for key in ["structural", "raynaud", "edema"] if levels.get(key) == "High")
+    abnormal_like = int(live_stats.get("Abnormal", 0)) + int(live_stats.get("Hemo", 0)) + int(live_stats.get("Aggregation", 0))
+    normal = int(live_stats.get("Normal", 0))
+
+    if band == "Excellent" and high_risk_count == 0 and normal >= abnormal_like:
+        return "Stable Flow Profile"
+    if band in ["Excellent", "Good"] and high_risk_count <= 1:
+        return "Balanced Microcirculation Profile"
+    if high_risk_count >= 2:
+        return "Follow-Up Recommended Profile"
+    return "Mild Structural Variation Profile"
+
+def get_personal_result_statement(score, risk_profile, live_stats):
+    levels = risk_profile.get("risk_levels", {})
+    structural_level = levels.get("structural", "Moderate").lower()
+    edema_level = levels.get("edema", "Moderate").lower()
+    band = get_health_band(score)["label"]
+
+    if band in ["Excellent", "Good"] and structural_level in ["low", "moderate"]:
+        return "Your current microcirculation pattern appears generally stable, with mild structural variation."
+    if edema_level == "high":
+        return "Your profile suggests a stable baseline with signs of edema-related variation that may benefit from follow-up."
+    if levels.get("raynaud", "").lower() == "high":
+        return "Your profile shows meaningful flow variability, and trend monitoring is recommended."
+    return "Your profile shows mixed microcirculatory features, and periodic follow-up can help track changes over time."
+
+def render_hero_result(health_score, percentile, risk_profile, live_stats):
+    band = get_health_band(health_score)
+    percentile_line, _ = get_percentile_text(percentile)
+    profile_label = get_personal_result_label(health_score, risk_profile, live_stats)
+    statement = get_personal_result_statement(health_score, risk_profile, live_stats)
+    st.markdown(
+        f"""
+        <div class="hero-result-card">
+            <div class="micro-label">Personal Result Overview</div>
+            <div class="section-title">Your Microcirculation Health Score</div>
+            <div class="hero-score">
+                {int(round(health_score))} / 100
+                <span class="grade-badge {band['badge_class']}">{band['label']}</span>
+            </div>
+            <div class="hero-percentile">{percentile_line}</div>
+            <div class="caption-text">Compared with users in the available reference dataset.</div>
+            <div class="result-label-chip">{profile_label}</div>
+            <div class="hero-summary">{statement}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_percentile_card(percentile):
+    percentile_line, pct = get_percentile_text(percentile)
+    top_pct = max(0, 100 - pct)
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Relative Position")
+    left, right = st.columns([2.3, 1])
+    with left:
+        st.markdown(f"### {percentile_line}")
+        st.caption("Compared with users in the available reference dataset")
+    with right:
+        st.metric("Reference Rank", f"Top {top_pct}%")
+    st.progress(min(max(pct, 0), 100))
+    st.markdown('</div>', unsafe_allow_html=True)
+
 def render_viewer_workspace():
     st.markdown(
         """
@@ -808,9 +939,9 @@ def render_viewer_workspace():
 
 def render_clinical_dashboard(user, live_stats, health_score, percentile, risk_profile, auto_count, manual_count, final_density):
     ctx = get_selected_study_context()
-    st.markdown("### Clinical Review Dashboard")
+    st.markdown("### Personal Health Analysis")
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### 1) Subject / Study Summary")
+    st.markdown("#### Subject / Study Summary")
     render_subject_context_card(show_edit=True)
     sum_c1, sum_c2, sum_c3 = st.columns(3)
     sum_c1.markdown(f"**Analysis Status**  \n`Completed`")
@@ -818,19 +949,58 @@ def render_clinical_dashboard(user, live_stats, health_score, percentile, risk_p
     sum_c3.markdown(f"**Review Timestamp**  \n`{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}`")
     st.markdown('</div>', unsafe_allow_html=True)
 
+    render_hero_result(health_score, percentile, risk_profile, live_stats)
+    render_percentile_card(percentile)
+
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### 2) Key Clinical Metrics")
-    st.caption(f"Study `{ctx['study_id']}` — score beats **{percentile}%** of reference cohort.")
+    st.markdown("#### What influenced your score")
+    i1, i2, i3, i4 = st.columns(4)
+    i1.metric("Live Density", f"{final_density:.1f}/mm")
+    i2.metric("Normal Loops", f"{live_stats.get('Normal', 0)}")
+    i3.metric("Abnormal Loops", f"{live_stats.get('Abnormal', 0)}")
+    i4.metric("Validation Adjustments", f"+{manual_count}")
+    st.caption("These inputs are directly derived from model output and physician validation edits.")
     st.altair_chart(plot_health_score_bar(health_score), use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### What this means")
+    band = get_health_band(health_score)["label"]
+    statement = get_personal_result_statement(health_score, risk_profile, live_stats)
+    st.markdown(f"**Current status:** {band}")
+    st.write(statement)
+    st.caption("This summary is an analytical interpretation and does not replace medical diagnosis.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Next steps")
+    levels = risk_profile.get("risk_levels", {})
+    next_steps = []
+    if levels.get("structural", "").lower() in ["moderate", "high"]:
+        next_steps.append("Track structural morphology trend over follow-up sessions.")
+    if levels.get("raynaud", "").lower() in ["moderate", "high"]:
+        next_steps.append("Review flow variability with symptom history and environmental triggers.")
+    if levels.get("edema", "").lower() in ["moderate", "high"]:
+        next_steps.append("Monitor edema/inflammation indicators in subsequent captures.")
+    if not next_steps:
+        next_steps.append("Maintain periodic check-ins to confirm microcirculation stability.")
+    for idx, step in enumerate(next_steps, start=1):
+        st.markdown(f"{idx}. {step}")
+    st.caption("Suggestions are guidance-oriented and should be interpreted with clinical context.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Detailed Research Metrics")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Overall Health Score", f"{health_score}")
     m2.metric("Live Density", f"{final_density:.1f}/mm")
     m3.metric("Auto Count", f"{auto_count}")
     m4.metric("Physician Added", f"+{manual_count}")
+    st.caption(f"Study `{ctx['study_id']}` — analytical benchmark aligned to the reference cohort.")
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### 3) Risk Indices")
+    st.markdown("#### Risk Indices")
     risk_defs = [
         ("Structural Damage", "structural"),
         ("Raynaud's Risk", "raynaud"),
@@ -852,12 +1022,12 @@ def render_clinical_dashboard(user, live_stats, health_score, percentile, risk_p
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### 4) Morphology Composition")
+    st.markdown("#### Morphology Composition")
     st.altair_chart(plot_capillary_distribution(live_stats), use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### 5) Validation Audit Log")
+    st.markdown("#### Validation Audit Log")
     if not st.session_state.manual_regions:
         st.write("No manual validation records.")
     else:
