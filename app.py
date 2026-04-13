@@ -295,17 +295,17 @@ st.markdown("""
         white-space: pre-wrap;
     }
     .hero-result-card {
-        background: linear-gradient(180deg, #fdfcf8 0%, #f7f4ec 100%);
-        border: 1px solid #d7d2c7;
+        background: linear-gradient(180deg, #fffdf8 0%, #f6f0e3 100%);
+        border: 1px solid #d8cfbd;
         border-radius: 14px;
-        padding: 18px;
+        padding: 22px;
         margin-bottom: 12px;
     }
     .hero-score {
         font-size: 3rem;
         font-weight: 700;
         line-height: 1.1;
-        color: #173B45;
+        color: #10353f;
         margin: 6px 0 8px 0;
     }
     .hero-percentile {
@@ -344,6 +344,22 @@ st.markdown("""
         color: #3a4f56;
         font-size: 0.78rem;
         font-weight: 600;
+    }
+    .user-soft-card {
+        background: #fdfcf9;
+        border: 1px solid #ddd8ce;
+        border-radius: 12px;
+        padding: 14px;
+    }
+    .user-secondary {
+        background: #faf8f3;
+        border: 1px solid #e3dfd6;
+        border-radius: 10px;
+        padding: 12px;
+    }
+    .research-emphasis {
+        border-left: 3px solid #c58b47;
+        padding-left: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -950,7 +966,7 @@ def render_hero_result(health_score, percentile, risk_profile, live_stats):
         f"""
         <div class="hero-result-card">
             <div class="micro-label">Personal Result Overview</div>
-            <div class="section-title">Your Microcirculation Health Score</div>
+            <div class="section-title">Your Health Score</div>
             <div class="hero-score">
                 {int(round(health_score))} / 100
                 <span class="grade-badge {band['badge_class']}">{band['label']}</span>
@@ -977,6 +993,140 @@ def render_percentile_card(percentile):
         st.metric("Reference Rank", f"Top {top_pct}%")
     st.progress(min(max(pct, 0), 100))
     st.markdown('</div>', unsafe_allow_html=True)
+
+def render_research_detail_sections(live_stats, health_score, risk_profile, auto_count, manual_count, final_density):
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Quantitative Metrics")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Overall Health Score", f"{health_score}")
+    m2.metric("Live Density", f"{final_density:.1f}/mm")
+    m3.metric("Auto Count", f"{auto_count}")
+    m4.metric("Physician Added", f"+{manual_count}")
+    st.altair_chart(plot_health_score_bar(health_score), use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Clinical Risk Indices")
+    risk_defs = [
+        ("Structural Damage", "structural"),
+        ("Raynaud's Risk", "raynaud"),
+        ("Edema / Inflammation", "edema"),
+    ]
+    rcols = st.columns(3)
+    for col, (title, key) in zip(rcols, risk_defs):
+        score = int(risk_profile['risks'][key])
+        level = risk_profile['risk_levels'][key]
+        with col:
+            st.markdown('<div class="risk-card">', unsafe_allow_html=True)
+            st.markdown(f"**{title}**")
+            st.markdown(f"<span class='risk-badge'>{level}</span>", unsafe_allow_html=True)
+            st.markdown(f"### {score}/100")
+            st.caption(get_risk_plain_language(key, level))
+            st.caption(get_risk_interpretation(title, score))
+            st.progress(min(max(score, 0), 100))
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.info(f"Diagnostic Flag: {risk_profile['diagnostic_flag']}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Morphology Composition")
+    st.altair_chart(plot_capillary_distribution(live_stats), use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Validation Log")
+    if not st.session_state.manual_regions:
+        st.write("No manual validation records.")
+    else:
+        for i, r in enumerate(st.session_state.manual_regions):
+            left, right = st.columns([6, 1])
+            with left:
+                st.markdown(
+                    f"""
+                    <div class="audit-row">
+                        <span class="risk-badge">{r['type']}</span>
+                        <span class="mono">({r['x']}, {r['y']})</span><br/>
+                        <span class="caption-text">Source: manual / physician · Entry #{i+1:03d}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            with right:
+                if st.button("Delete", key=f"del_audit_{i}", use_container_width=True):
+                    st.session_state.manual_regions.pop(i)
+                    st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def render_user_view(user, live_stats, health_score, percentile, risk_profile, auto_count, manual_count, final_density):
+    st.markdown("### Personal Health Analysis")
+    st.markdown('<div class="clinical-card user-soft-card">', unsafe_allow_html=True)
+    st.markdown("#### Personal Result Label")
+    st.markdown(f"**{get_personal_result_label(health_score, risk_profile, live_stats)}**")
+    st.caption("A concise summary of your current microcirculation pattern in this scan.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    render_hero_result(health_score, percentile, risk_profile, live_stats)
+    render_percentile_card(percentile)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### What influenced your score")
+    drivers = get_score_drivers(health_score, final_density, live_stats, risk_profile)
+    dcols = st.columns(3)
+    for col, driver in zip(dcols, drivers):
+        chip_label = {"positive": "Positive influence", "neutral": "Neutral influence", "concern": "Concern influence"}[driver["direction"]]
+        chip_class = {"positive": "insight-positive", "neutral": "insight-neutral", "concern": "insight-concern"}[driver["direction"]]
+        with col:
+            st.markdown('<div class="insight-card">', unsafe_allow_html=True)
+            st.markdown(f"<span class='insight-chip {chip_class}'>{chip_label}</span>", unsafe_allow_html=True)
+            st.markdown(f"**{driver['title']}**")
+            st.write(driver["line"])
+            st.caption(driver["support"])
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### What this means")
+    band = get_health_band(health_score)["label"]
+    summary = generate_user_summary(health_score, risk_profile, live_stats)
+    st.markdown(f"**Current status:** {band}")
+    st.write(summary)
+    st.caption("Screening/research interpretation only; combine with clinical context.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Recommended next steps")
+    next_steps = generate_next_steps(risk_profile, final_density)
+    st.markdown("**Immediate next step**")
+    for idx, step in enumerate(next_steps["immediate"], start=1):
+        st.markdown(f"{idx}. {step}")
+    st.markdown("**Longer-term tracking suggestion**")
+    for idx, step in enumerate(next_steps["long_term"], start=1):
+        st.markdown(f"{idx}. {step}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    with st.expander("Research details (secondary)", expanded=False):
+        st.markdown('<div class="user-secondary">', unsafe_allow_html=True)
+        render_research_detail_sections(live_stats, health_score, risk_profile, auto_count, manual_count, final_density)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def render_research_view(user, live_stats, health_score, percentile, risk_profile, auto_count, manual_count, final_density):
+    ctx = get_selected_study_context()
+    st.markdown("### Research View")
+    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
+    st.markdown("#### Subject / Study Summary")
+    render_subject_context_card(show_edit=True)
+    sum_c1, sum_c2, sum_c3 = st.columns(3)
+    sum_c1.markdown(f"**Analysis Status**  \n`Completed`")
+    sum_c2.markdown(f"**Validated Count**  \n`{manual_count}`")
+    sum_c3.markdown(f"**Review Timestamp**  \n`{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}`")
+    st.caption(f"Study `{ctx['study_id']}` — analytical benchmark aligned to the reference cohort.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="clinical-card research-emphasis">', unsafe_allow_html=True)
+    st.markdown("#### Personal result snapshot")
+    render_hero_result(health_score, percentile, risk_profile, live_stats)
+    st.markdown('</div>', unsafe_allow_html=True)
+    render_research_detail_sections(live_stats, health_score, risk_profile, auto_count, manual_count, final_density)
 
 def render_viewer_workspace():
     st.markdown(
@@ -1056,122 +1206,6 @@ def render_viewer_workspace():
         new_stats, new_cleaned_mask, new_overlay = inference.recalculate_overlay(st.session_state.processed_original, st.session_state.raw_mask, min_area)
         st.session_state.stats, st.session_state.base_overlay, st.session_state.cleaned_mask = new_stats.copy(), new_overlay, new_cleaned_mask
         st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def render_clinical_dashboard(user, live_stats, health_score, percentile, risk_profile, auto_count, manual_count, final_density):
-    ctx = get_selected_study_context()
-    st.markdown("### Personal Health Analysis")
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### Subject / Study Summary")
-    render_subject_context_card(show_edit=True)
-    sum_c1, sum_c2, sum_c3 = st.columns(3)
-    sum_c1.markdown(f"**Analysis Status**  \n`Completed`")
-    sum_c2.markdown(f"**Validated Count**  \n`{manual_count}`")
-    sum_c3.markdown(f"**Review Timestamp**  \n`{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}`")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    render_hero_result(health_score, percentile, risk_profile, live_stats)
-    render_percentile_card(percentile)
-
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### What influenced your score")
-    drivers = get_score_drivers(health_score, final_density, live_stats, risk_profile)
-    dcols = st.columns(3)
-    for col, driver in zip(dcols, drivers):
-        chip_label = {"positive": "Positive influence", "neutral": "Neutral influence", "concern": "Concern influence"}[driver["direction"]]
-        chip_class = {"positive": "insight-positive", "neutral": "insight-neutral", "concern": "insight-concern"}[driver["direction"]]
-        with col:
-            st.markdown('<div class="insight-card">', unsafe_allow_html=True)
-            st.markdown(f"<span class='insight-chip {chip_class}'>{chip_label}</span>", unsafe_allow_html=True)
-            st.markdown(f"**{driver['title']}**")
-            st.write(driver["line"])
-            st.caption(driver["support"])
-            st.markdown('</div>', unsafe_allow_html=True)
-    st.caption("Insight cards summarize the strongest upward or downward effects from current analysis outputs.")
-    st.altair_chart(plot_health_score_bar(health_score), use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### What this means")
-    band = get_health_band(health_score)["label"]
-    summary = generate_user_summary(health_score, risk_profile, live_stats)
-    st.markdown(f"**Current status:** {band}")
-    st.write(summary)
-    st.caption("This result currently indicates a screening/research interpretation and does not replace formal diagnosis.")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### Next steps")
-    next_steps = generate_next_steps(risk_profile, final_density)
-    st.markdown("**Immediate next step**")
-    for idx, step in enumerate(next_steps["immediate"], start=1):
-        st.markdown(f"{idx}. {step}")
-    st.markdown("**Longer-term tracking suggestion**")
-    for idx, step in enumerate(next_steps["long_term"], start=1):
-        st.markdown(f"{idx}. {step}")
-    st.caption("Guidance is linked to current analysis signals and should be interpreted with clinical context.")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### Detailed Research Metrics")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Overall Health Score", f"{health_score}")
-    m2.metric("Live Density", f"{final_density:.1f}/mm")
-    m3.metric("Auto Count", f"{auto_count}")
-    m4.metric("Physician Added", f"+{manual_count}")
-    st.caption(f"Study `{ctx['study_id']}` — analytical benchmark aligned to the reference cohort.")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### Risk Indices")
-    risk_defs = [
-        ("Structural Damage", "structural"),
-        ("Raynaud's Risk", "raynaud"),
-        ("Edema / Inflammation", "edema"),
-    ]
-    rcols = st.columns(3)
-    for col, (title, key) in zip(rcols, risk_defs):
-        score = int(risk_profile['risks'][key])
-        level = risk_profile['risk_levels'][key]
-        with col:
-            st.markdown('<div class="risk-card">', unsafe_allow_html=True)
-            st.markdown(f"**{title}**")
-            st.markdown(f"<span class='risk-badge'>{level}</span>", unsafe_allow_html=True)
-            st.markdown(f"### {score}/100")
-            st.caption(get_risk_plain_language(key, level))
-            st.caption(get_risk_interpretation(title, score))
-            st.progress(min(max(score, 0), 100))
-            st.markdown('</div>', unsafe_allow_html=True)
-    st.info(f"Diagnostic Flag: {risk_profile['diagnostic_flag']}")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### Morphology Composition")
-    st.altair_chart(plot_capillary_distribution(live_stats), use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="clinical-card">', unsafe_allow_html=True)
-    st.markdown("#### Validation Audit Log")
-    if not st.session_state.manual_regions:
-        st.write("No manual validation records.")
-    else:
-        for i, r in enumerate(st.session_state.manual_regions):
-            left, right = st.columns([6, 1])
-            with left:
-                st.markdown(
-                    f"""
-                    <div class="audit-row">
-                        <span class="risk-badge">{r['type']}</span>
-                        <span class="mono">({r['x']}, {r['y']})</span><br/>
-                        <span class="caption-text">Source: manual / physician · Entry #{i+1:03d}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with right:
-                if st.button("Delete", key=f"del_audit_{i}", use_container_width=True):
-                    st.session_state.manual_regions.pop(i)
-                    st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ================= 2. DATA INPUT DIALOG =================
@@ -1384,6 +1418,17 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
 
     # ---------------- 狀態二：推論完成 (顯示 4:6 控制台與數據面版) ----------------
     else:
+        if 'view_mode' not in st.session_state:
+            st.session_state.view_mode = "User View"
+
+        st.radio(
+            "Display Mode",
+            ["User View", "Research View"],
+            key="view_mode",
+            horizontal=True,
+            help="User View emphasizes personal insights. Research View exposes full technical depth."
+        )
+
         col_left, col_right = st.columns([4, 6], gap="large")
 
         # 🔴 左半部：影像工作站
@@ -1414,16 +1459,28 @@ if uploaded_file is not None and st.session_state.get('confirmed_file', False):
 
             profiler = ClinicalRiskProfiler(stats=live_stats, fov=user['fov'])
             risk_profile = profiler.analyze()
-            render_clinical_dashboard(
-                user=user,
-                live_stats=live_stats,
-                health_score=health_score,
-                percentile=percentile,
-                risk_profile=risk_profile,
-                auto_count=auto_count,
-                manual_count=manual_count,
-                final_density=final_density
-            )
+            if st.session_state.view_mode == "User View":
+                render_user_view(
+                    user=user,
+                    live_stats=live_stats,
+                    health_score=health_score,
+                    percentile=percentile,
+                    risk_profile=risk_profile,
+                    auto_count=auto_count,
+                    manual_count=manual_count,
+                    final_density=final_density
+                )
+            else:
+                render_research_view(
+                    user=user,
+                    live_stats=live_stats,
+                    health_score=health_score,
+                    percentile=percentile,
+                    risk_profile=risk_profile,
+                    auto_count=auto_count,
+                    manual_count=manual_count,
+                    final_density=final_density
+                )
 
     # ---------------- 狀態三：生成專業報告 ----------------
     if st.session_state.get('inference_done', False):
